@@ -14,6 +14,10 @@ y_bar = (b-a)/ x.shape[0] * (x**2).sum()
 
 def integrand(x):
     return  x**2
+
+# Monte Carlo integration
+y = integrand(x)
+y_bar = 
     
 I = quad(integrand, a, b,)
 print("Actual integration: ", I[0], "Monte Carlo integration: ", y_bar)
