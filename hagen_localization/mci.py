@@ -2,13 +2,15 @@ import numpy as np
 import matplotlib.pyplot as plt
 from scipy.integrate import quad
 
+
 # Example 01 
 a = 0
 b = 5
-x = np.random.uniform(low=a, high=b, size=100)
+x = np.random.uniform(low=a, high=b, size=300)
 # Monte Carlo integration
 y = x**2
-# y_bar = TODO 
+
+y_bar = (b-a)/ x.shape[0] * (x**2).sum()
 
 def integrand(x):
     return  x**2
