@@ -112,6 +112,8 @@ class PFLocalization():
         rotation = particles[:, 2] + u[1]*dt 
         N = len(particles)
         # TODO update the particle next state based on the motion model defined in self. x_forward()  
+        for prtcl in range(N):
+            particles[prtcl,:] = self.x_forward(particles[prtcl,:],u,dt)
         particles[:, 2] %= 2 * np.pi
         
         return particles 
@@ -124,14 +126,14 @@ class PFLocalization():
         z = (np.linalg.norm(landmarks - x, axis=1) + (randn(NL) * R))
         for i, landmark in enumerate(landmarks):
             # TODO calculate innovation or measurement residual, i.e., |particles - landmark|
-            distance = 
+            distance =np.linalg.norm(particles[:,0:2] - landmark) 
             # TODO calculate the weighting parameters with respect to each sensor measurement
             #, i.e., scipy.stats.norm(distance, R).pdf(z[i])
-            weights *= 
+            weights *= scipy.stats.norm(distance, R).pdf(z[i])
 
         weights += 1.e-300      # avoid round-off to zero
         # TODO normalize the weights 
-        weights = 
+        weights = weights / weights.sum()
         return weights
         
     def z_landmark(self, lmark, sim_pos, std_rng, std_brg):
@@ -169,15 +171,16 @@ class PFLocalization():
         
     def importance_sampling(self, particles, weights, indexes):
         # TODO retrieve selected particle
-        particles[:] = 
+        particles[:] = particles[indexes]
         # TODO retrieve selected weights
-        weights[:] = 
+        weights[:] = weights[indexes]
         weights.fill (1.0 / len(weights))
+        return weights
     
     def estimate(self, particles, weights):
         pos = particles[:, 0:2]
         # TODO estimate mean value of the particles 
-        mean = 
+        mean = np.average(pos, weights=weights, axis=0)
         var  = np.average((pos - mean)**2, weights=weights, axis=0)
         return mean, var
     
@@ -190,7 +193,7 @@ class PFLocalization():
 
         indexes = np.zeros(N, 'i')
         # TODO calculate the cumulative sum of weight distribution 
-        cumulative_sum = 
+        cumulative_sum = np.cumsum(weights)
         i, j = 0, 0
         while i < N:
             if positions[i] < cumulative_sum[j]:
