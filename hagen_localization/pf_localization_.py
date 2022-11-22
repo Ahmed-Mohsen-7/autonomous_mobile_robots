@@ -21,7 +21,6 @@ class PFLocalization():
         self.std_steer = std_steer
         self.get_linearized_motion_model()
         self.subs = {self._x: 0, self._y: 0, self._vt:0, self._wt:0, self._dt:dt, self._theta:0}
-        
         self.x = np.zeros((dim_x, 1)) # state
         self.P = np.eye(dim_x)        # uncertainty covariance
         self.R = np.eye(dim_z)        # state uncertainty
@@ -112,8 +111,9 @@ class PFLocalization():
         rotation = particles[:, 2] + u[1]*dt 
         N = len(particles)
         # TODO update the particle next state based on the motion model defined in self. x_forward()  
-        for prtcl in range(N):
-            particles[prtcl,:] = self.x_forward(particles[prtcl,:],u,dt)
+        particles[:, 0] = particles[:, 0] + -r*np.sin(theta) + r*np.sin(rotation)
+        particles[:, 1] = particles[:, 1] + r*np.cos(theta) - r*np.cos(rotation)
+        particles[:, 2] = particles[:, 2] + u[1]*dt + (randn(N) * std[0])
         particles[:, 2] %= 2 * np.pi
         
         return particles 
@@ -125,15 +125,15 @@ class PFLocalization():
         NL = len(landmarks)
         z = (np.linalg.norm(landmarks - x, axis=1) + (randn(NL) * R))
         for i, landmark in enumerate(landmarks):
-            # TODO calculate innovation or measurement residual, i.e., |particles - landmark|
-            distance =np.linalg.norm(particles[:,0:2] - landmark) 
+            # TODO calculate measurement residual, i.e., |particles - landmark|
+            distance = np.linalg.norm(particles[:, 0:2]-landmark, axis=1)
             # TODO calculate the weighting parameters with respect to each sensor measurement
             #, i.e., scipy.stats.norm(distance, R).pdf(z[i])
             weights *= scipy.stats.norm(distance, R).pdf(z[i])
 
         weights += 1.e-300      # avoid round-off to zero
         # TODO normalize the weights 
-        weights = weights / weights.sum()
+        weights /= sum(weights) 
         return weights
         
     def z_landmark(self, lmark, sim_pos, std_rng, std_brg):
@@ -175,7 +175,7 @@ class PFLocalization():
         # TODO retrieve selected weights
         weights[:] = weights[indexes]
         weights.fill (1.0 / len(weights))
-        return weights
+        return  weights
     
     def estimate(self, particles, weights):
         pos = particles[:, 0:2]
@@ -223,10 +223,8 @@ class PFLocalization():
             sim_pos = self.x_forward(sim_pos, u, self.dt) # simulate robot
             track.append(sim_pos)
             particles = self.predict(particles, u=u, std=(.02, .05), dt=self.dt)
-            
             # incorporate measurements
             weights = self.update(particles, weights,  sim_pos.flatten()[0:2], R=sensor_std_err, landmarks=landmarks)
-            
             if self.neff(weights) < N/2:
                 indexes = self.resample_particles(weights)
                 weights = self.importance_sampling(particles, weights, indexes)
@@ -241,8 +239,8 @@ class PFLocalization():
         plt.legend([p1, p2], ['Real', 'PF'], loc=4, numpoints=1)
         plt.show()
         
-dt = 0.05
+dt = 0.1
 landmarks = array([[50, 100], [40, 90], [150, 150], [-150, 200]])
-pfl = PFLocalization(dt, std_vel=0.1, std_steer=np.radians(1))
-pfl.run_localization(100, landmarks, initial_x=(1,1, np.pi/4), iteration_num=40)
-# pfl.run_localization(500, landmarks, iteration_num=200)
+pfl = PFLocalization(dt, std_vel=2.0, std_steer=np.radians(1))
+# pfl.run_localization(100, landmarks, initial_x=(1,1, np.pi/4), iteration_num=500)
+pfl.run_localization(500, landmarks, iteration_num=200)
