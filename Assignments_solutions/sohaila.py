@@ -15,14 +15,14 @@ from numpy.random import uniform
 import scipy.stats
 
 class PFLocalization():
-    def __init__(self, prtcls_no,dt, std_vel, std_steer, dim_x=3, dim_z=2, dim_u=2):
+    def __init__(self, dt, std_vel, std_steer, dim_x=3, dim_z=2, dim_u=2):
         self.dt = dt
         self.std_vel = std_vel
         self.std_steer = std_steer
         self.get_linearized_motion_model()
         self.subs = {self._x: 0, self._y: 0, self._vt:0, self._wt:0, self._dt:dt, self._theta:0}
         self.x = np.zeros((dim_x, 1)) # state
-        self.P = np.vstack( np.eye(dim_x) for i in range(prtcls_no))        # uncertainty covariance
+        self.P = np.eye(dim_x)        # uncertainty covariance
         self.R = np.eye(dim_z)        # state uncertainty
         self.Q = np.eye(dim_x)        # process uncertainty
         self.y = np.zeros((dim_z, 1)) # residual
@@ -30,14 +30,39 @@ class PFLocalization():
         self.K = np.zeros(self.x.shape) # kalman gain
         self.y = np.zeros((dim_z, 1))
         self._I = np.eye(dim_x)
-        self.ctrl_state = 0        #control state to change ctrl commands
-        self.dmin = 0.5   #goal tolerance
+
+    def wrap_to_pi(self, x):
+        x = np.array([x])
+        xwrap = np.remainder(x, 2*np.pi)
+        mask = np.abs(xwrap)>np.pi
+        xwrap[mask] -= 2*np.pi * np.sign(xwrap[mask])
+        return xwrap[0]
+
+    def control_ref_pose(self, x, k_p=0.5, k_w=0.7, D=-5.0, S=18.0, dmin=10):
+        self.refPose = np.array([0+D,0-S,0])
+        self.k_p = k_p 
+        self.k_w = k_w
+        self.D = np.sqrt((x[0]-self.refPose[0])**2 + (x[1]-self.refPose[1])**2)
+        print(self.D)
+
+
+        phiR = np.arctan2((self.refPose[1]-x[1]),(self.refPose[0]-x[0]))  
+        e_phi = self.wrap_to_pi(phiR - self.x[2])
+
+        v = self.k_p*self.D*np.sign(np.cos(e_phi))
+        w = self.k_w*np.arctan(np.tan(e_phi))
+        # print("u_control: ", v, w)
+
+        if self.D <= dmin:
+            print("debug")
+            return 0,0
+        return v, w
 
     def get_linearized_motion_model(self):
         x, y, theta, vt, wt, dt = sympy.symbols('x, y, theta, v_t, omega_t, delta_t')
-        f = sympy.Matrix([[x+-(vt/wt)*sympy.sin(theta)+ (vt/wt)*sympy.sin(theta+ wt*dt)]
-                  ,[y+ (vt/wt)*sympy.cos(theta) - (vt/wt)*sympy.cos(theta+ wt*dt)]
-                  , [theta+wt*dt]])
+        f = sympy.Matrix([[x + vt*dt*sympy.cos(theta+dt*wt/2)],
+                          [y + vt*dt*sympy.sin(theta+dt*wt/2)],
+                          [theta + wt*dt]])
         self._x, self._y, self._theta, self._vt, self._wt, self._dt = x, y, theta, vt, wt, dt
         self.state = sympy.Matrix([x, y, theta])
         self.control = sympy.Matrix([vt, wt])
@@ -49,19 +74,22 @@ class PFLocalization():
         r = u[0]/u[1]
         theta = x[2]
         rotation = x[2] + u[1]*dt 
-        x_plus = np.array([x[0] + -r*sin(theta) + r*sin(rotation),
-                       x[1] + r*cos(theta) - r*cos(rotation),
-                       x[2] + u[1]*dt])
+        # x_plus = np.array([x[0] + -r*sin(theta) + r*sin(rotation),
+        #                    x[1] + r*cos(theta) - r*cos(rotation),
+        #                    x[2] + u[1]*dt])
+        x_plus = np.array([x[0] + u[0]*dt*cos(theta+dt*u[1]/2),
+                           x[1] + u[0]*dt*sin(theta+dt*u[1]/2) ,
+                           x[2] + u[1]*dt])
         return  x_plus 
         
     def get_linearized_measurement_model(self, x, landmark_pos):
         px = landmark_pos[0]
         py = landmark_pos[1]
-        hyp = (px - x[0])**2 + (py - x[1])**2
+        hyp = (px - x[0, 0])**2 + (py - x[1, 0])**2
         dist = sqrt(hyp)
-        Hx = array([[dist],[atan2(py - x[1], px - x[0]) - x[2]]])
-        H = array([[-(px - x[0]) / dist, -(py - x[1]) / dist, 0]
-                , [ (py - x[1]) / hyp,  -(px - x[0]) / hyp, -1]])
+        Hx = array([[dist],[atan2(py - x[1, 0], px - x[0, 0]) - x[2, 0]]])
+        H = array([[-(px - x[0, 0]) / dist, -(py - x[1, 0]) / dist, 0]
+                , [ (py - x[1, 0]) / hyp,  -(px - x[0, 0]) / hyp, -1]])
         return Hx, H
     
     def create_gaussian_particles(self, mean, std, N):
@@ -90,11 +118,11 @@ class PFLocalization():
             y[1] -= 2 * np.pi
         return y
     
-    def ekf_predict(self, prtcl,idx,u):
-        #self.x = self.x_forward(self.x, u, self.dt)
-        self.subs[self._x] = prtcl[0]
-        self.subs[self._y] = prtcl[1]
-        self.subs[self._theta] = prtcl[2]
+    def predict(self, u):
+        self.x = self.x_forward(self.x, u, self.dt)
+        self.subs[self._x] = self.x[0, 0]
+        self.subs[self._y] = self.x[1, 0]
+        self.subs[self._theta] = self.x[2, 0]
         self.subs[self._vt] = u[0]
         self.subs[self._wt] = u[1]
 
@@ -103,10 +131,8 @@ class PFLocalization():
 
         # covariance in the control space
         M = array([[self.std_vel**2, 0],  [0, self.std_steer**2]])
-        prtcl_P_prev =self.P[idx*3:idx*3+3,:]
-        #print("F: ",F.shape," | prtcl_P_prev: ",prtcl_P_prev.shape," | V: ",V.shape," | M: ",M.shape)
-        prtcl_P = F @ prtcl_P_prev @ F.T + V @ M @ V.T + self.Q
-        return prtcl_P
+
+        self.P = F @ self.P @ F.T + V @ M @ V.T + self.Q
         
     def predict(self, particles, u, std, dt=1.):
         r = u[0]/u[1]
@@ -116,42 +142,17 @@ class PFLocalization():
         # TODO update the particle next state based on the motion model defined in self. x_forward()  
         particles[:, 0] = particles[:, 0] + -r*np.sin(theta) + r*np.sin(rotation)
         particles[:, 1] = particles[:, 1] + r*np.cos(theta) - r*np.cos(rotation)
-        particles[:, 2] = particles[:, 2] + u[1]*dt 
+        particles[:, 2] = particles[:, 2] + u[1]*dt + (randn(N) * std[0])
         particles[:, 2] %= 2 * np.pi
-
-        #apply ekf prediction on each particle
-        for idx,prtcl in enumerate(particles):
-            #print(particles[idx,:].shape)
-            prtcl_P = self.ekf_predict(prtcl,idx,u)
-            self.P[idx*3:idx*3+3,:] = prtcl_P
-        #print(self.P.shape)
+        
         return particles 
          
-    def ekf_update(self,index,particle, z, landmarks):
-        Hx, H = self.get_linearized_measurement_model(particle, landmarks)
-        PHT = np.dot(self.P[index*3:index*3+3,:], H.T)
-        self.K = PHT.dot(np.linalg.inv(np.dot(H, PHT) + self.R))
-        self.y = self.residual(z, Hx)
-        #print("particle.shape ",particle.shape)
-        #print(np.dot(self.K, self.y).shape)
-        particle= particle.reshape(3,1) + np.dot(self.K, self.y)
-        I_KH = self._I - np.dot(self.K, H)
-        self.P[index*3:index*3+3,:] = np.dot(I_KH, self.P[index*3:index*3+3,:] ).dot(I_KH.T) + np.dot(self.K, self.R).dot(self.K.T)
-        self.z = deepcopy(z)
-        return particle
-
+    
     def update(self, particles, weights, x, R, landmarks):
         weights.fill(1.)
         # distance from robot to each landmark
         NL = len(landmarks)
         z = (np.linalg.norm(landmarks - x, axis=1) + (randn(NL) * R))
-        #print(z)
-        #ekf update
-        for i, landmark in enumerate(landmarks):
-            for index,prtcl in enumerate(particles):
-                particles[index,:] = self.ekf_update(index,prtcl,z[i], landmark).reshape(1,3)
-
-        #weights update
         for i, landmark in enumerate(landmarks):
             # TODO calculate measurement residual, i.e., |particles - landmark|
             distance = np.linalg.norm(particles[:, 0:2]-landmark, axis=1)
@@ -171,33 +172,7 @@ class PFLocalization():
         z = np.array([[d + randn()*std_rng],
                     [a + randn()*std_brg]])
         return z
-
-    def control_strategy(self,x,x_goal):
-        r =  np.sqrt(x_goal[0]**2 + x_goal[1]**2) / 4
-        done = False
-        #move along the first circle
-        if (self.ctrl_state == 0 ):
-                self.D = np.sqrt((x[0]-x_goal[0]/2)**2 
-                                        + (x[1]-x_goal[1]/2)**2)
-
-                if(self.D < self.dmin):
-                    print("Reached the intermediate point")
-                    self.ctrl_state  = 1
-                
-                v = 1
-                w = -1 / r
-                #print("Distance to the goal 1: ", self.D)
-        #move along the second circle
-        else:      
-            self.D = np.sqrt((x[0]-x_goal[0])**2 
-                                        + (x[1]-x_goal[1])**2)    
-            if(self.D < self.dmin):
-                print("Reached the goal")
-                done = True
-            v = 1
-            w = 1 / r
-        return v,w,done
-
+    
     def covariance_ellipse(self, P, deviations=1):
         U, s, _ = np.linalg.svd(P)
         orientation = math.atan2(U[1, 0], U[0, 0])
@@ -263,54 +238,42 @@ class PFLocalization():
         if initial_x is not None:
             particles = self.create_gaussian_particles(mean=initial_x, std=(5, 5, np.pi/4), N=N)
         else:
-            particles = self.create_uniform_particles((-5,5), (-5,5), (-np.pi, -np.pi/2), N)
+            particles = self.create_uniform_particles((-40,40), (-40,40), (0, 6.28), N)
         weights = np.zeros(N)
           
         xs = []
-        self.x = array([[0, 0, -3*np.pi/4]]).T # x, y, steer angle
+        self.x = array([[0.0, 0.0, 0.0]]).T # x, y, steer angle
         sim_pos = self.x.copy()
-        u = array([0, .0]) 
+        # u = array([1.1, .01]) 
         plt.scatter(particles[:, 0], particles[:, 1], alpha=0.1, color='b')
         plt.scatter(landmarks[:, 0], landmarks[:, 1], marker='s', s=699)
-        track = []
-        for i in range(iteration_num):
-            v,w,done = self.control_strategy(sim_pos, x_goal)  #get control signals based on simulated robot
-            u[0],u[1] = v,w 
-            sim_pos = self.x_forward(sim_pos, u, self.dt) # simulate robot
-            track.append(sim_pos)
-            #reach the goal
-            if done:
-                break
-            particles = self.predict(particles, u=u, std=(.02, .05), dt=self.dt)
-            # incorporate measurements
-            weights = self.update(particles, weights,  sim_pos.flatten()[0:2], R=sensor_std_err, landmarks=landmarks)
-            if self.neff(weights) < N/2:
-                indexes = self.resample_particles(weights)
-                weights = self.importance_sampling(particles, weights, indexes)
 
-            mu, var = self.estimate(particles, weights)
-            xs.append(mu)
-            # p1 = plt.scatter(sim_pos[0], sim_pos[1], marker='+', color='k', s=180, lw=3)
+        for i in range(iteration_num):
+            print("sim pos: ",sim_pos)
+            v, w = self.control_ref_pose(sim_pos)
+            u = np.array([v, w])
+            # print("u_loop: ", v, w)
+            sim_pos = self.x_forward(sim_pos, u, dt) # simulate robot
+     
+            # particles = self.predict(particles, u=u, std=(.02, .05), dt=self.dt)
+            # # incorporate measurements
+            # weights = self.update(particles, weights,  sim_pos.flatten()[0:2], R=sensor_std_err, landmarks=landmarks)
+            # if self.neff(weights) < N/2:
+            #     indexes = self.resample_particles(weights)
+            #     weights = self.importance_sampling(particles, weights, indexes)
+
+            # mu, var = self.estimate(particles, weights)
+            # xs.append(mu)
+            p1 = plt.scatter(sim_pos[0], sim_pos[1], marker='+', color='k')
             # p2 = plt.scatter(mu[0], mu[1], marker='s', color='r')
             # p3 = plt.scatter(particles[:, 0], particles[:, 1], alpha=0.1)
-        track = np.array(track)
+        
         xs = np.array(xs)
-        p1 = plt.scatter(track[:,0], track[:,1] , color='k',label="Real")
-        p2 = plt.scatter(xs[:,0], xs[:,1], color='r',label="PF")
-        plt.plot(0,0,'oy',label="Start point")
-        plt.plot(D /2,S/2,'ob',label="Intermediate point")
-        plt.plot(D ,S,'og',label="Goal point")
-        #plt.axis('equal')
-        plt.legend()
+        # plt.legend([p1, p2], ['Real', 'PF'], loc=4, numpoints=1)
         plt.show()
         
-dt = 0.1
-#Assumed goal
-D = -50
-S = 50
-x_goal = np.array([[D],[S]])
-landmarks = array([[50, 100], [40, 90], [150, 150], [-150, 200]])
-prtcls_no = 100
-pfl = PFLocalization(prtcls_no,dt, std_vel=1, std_steer=np.radians(1))
-#pfl.run_localization(100, landmarks, initial_x=(0, 0, -3*np.pi/4), iteration_num=2000)
-pfl.run_localization(prtcls_no, landmarks, iteration_num=2000)
+dt = 0.05
+landmarks = array([[5, 30], [5, -30], [-5, 0]])
+pfl = PFLocalization(dt, std_vel=5.0, std_steer=np.radians(1))
+# pfl.run_localization(100, landmarks, initial_x=(1,1, np.pi/4), iteration_num=500)
+pfl.run_localization(500, landmarks, iteration_num=200)
