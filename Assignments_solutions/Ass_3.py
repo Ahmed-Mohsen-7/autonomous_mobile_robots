@@ -208,7 +208,10 @@ class EKFLocalization():
         if ylim is not None: plt.ylim(*ylim)
         plt.show()
         return ekf
-        
+
+
+import time
+start_time = time.time()
 dt = 0.1
 #Assumed parameters
 D = 10
@@ -218,3 +221,4 @@ x_goal = np.array([[D],[S]])
 landmarks = array([[5, 30], [5, -30], [-5, 0]])
 ekf = EKFLocalization(dt, std_vel=4, std_steer=np.radians(1))
 ekf.run_localization(landmarks, std_range=0.3, std_bearing=0.1, ellipse_step=1000, iteration_num=600)
+print("--- %s seconds ---" % (time.time() - start_time))     

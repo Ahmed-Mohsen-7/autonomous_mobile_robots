@@ -302,8 +302,11 @@ class PFLocalization():
         plt.plot(D ,S,'og',label="Goal point")
         #plt.axis('equal')
         plt.legend()
+        print("--- %s seconds ---" % (time.time() - start_time)) 
         plt.show()
-        
+
+import time
+start_time = time.time()      
 dt = 0.1
 #Assumed goal
 D = -50
@@ -313,4 +316,4 @@ landmarks = array([[50, 100], [40, 90], [150, 150], [-150, 200]])
 prtcls_no = 100
 pfl = PFLocalization(prtcls_no,dt, std_vel=1, std_steer=np.radians(1))
 #pfl.run_localization(100, landmarks, initial_x=(0, 0, -3*np.pi/4), iteration_num=2000)
-pfl.run_localization(prtcls_no, landmarks, iteration_num=2000)
+pfl.run_localization(prtcls_no, landmarks, iteration_num=100)
