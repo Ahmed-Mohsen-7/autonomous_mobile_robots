@@ -30,7 +30,7 @@ class EKFLocalization():
         self.y = np.zeros((dim_z, 1))
         self._I = np.eye(dim_x)
         self.ctrl_state = 0
-        self.dmin = 0.5   #goal tolerance
+        self.dmin = 0.2    #goal tolerance
 
     def get_linearized_motion_model(self):
         x, y, theta, vt, wt, dt = sympy.symbols('x, y, theta, v_t, omega_t, delta_t')
@@ -68,29 +68,28 @@ class EKFLocalization():
         return Hx, H
         
     def control_strategy(self,x,x_goal):
-        r =  np.sqrt(x_goal[0]**2 + x_goal[1]**2) / 4
         done = False
         #move along the first circle
         if (self.ctrl_state == 0 ):
                 self.D = np.sqrt((x[0]-x_goal[0]/2)**2 
-                                        + (x[1]-x_goal[1]/2)**2)
+                                        + (x[1])**2-x_goal[1])
 
                 if(self.D < self.dmin):
                     print("Reach to the intermediate point")
                     self.ctrl_state  = 1
                 
                 v = 1
-                w = -1 / r
+                w = 1 / 5
                 #print("Distance to the goal 1: ", self.D)
         #move along the second circle
         else:      
-            self.D = np.sqrt((x[0]-x_goal[0])**2 
-                                        + (x[1]-x_goal[1])**2)    
+            self.D = np.sqrt((x[0]-20)**2 
+                                        + (x[1])**2)    
             if(self.D < self.dmin):
                 print("Reach to the goal")
                 done = True
             v = 1
-            w = 1 / r
+            w = -1 / 5
         return v,w,done
 
 
@@ -167,7 +166,7 @@ class EKFLocalization():
         plt.plot([x, x+ w*cos(a)], [y, y + w*sin(a)])
     
     def run_localization(self, landmarks, std_range, std_bearing, step=5, ellipse_step=2000, ylim=None, iteration_num=5):
-        self.x = array([[0, 0, np.pi/4]]).T # x, y, steer angle
+        self.x = array([[0, 0, -np.pi/2]]).T # x, y, steer angle
         self.P = np.diag([.1, .1, .1])
         self.R = np.diag([std_range**2, std_bearing**2])
         sim_pos = self.x.copy()
@@ -200,25 +199,21 @@ class EKFLocalization():
         plt.plot(track1[:, 0], track1[:,1], color='k', lw=2,label = "Desired Path")
         plt.plot(track2[:, 0], track2[:,1], color='g', lw=2,label = "EKF")
         plt.plot(0,0,'oy',label="Start")
-        plt.plot(D /2,S/2,'ob',label="Intermediate")
-        plt.plot(D ,S,'or',label="Goal")
+        plt.plot(10,0,'ob',label="Intermediate")
+        plt.plot(20,0,'or',label="Goal")
         plt.axis('equal')
         plt.legend()
         plt.title("Robot EKF Localization")
         if ylim is not None: plt.ylim(*ylim)
         plt.show()
         return ekf
-
-
-import time
-start_time = time.time()
+        
 dt = 0.1
 #Assumed parameters
-D = 10
-S = -14.14
+D = 20
+S = 0
 x_goal = np.array([[D],[S]])
 
 landmarks = array([[5, 30], [5, -30], [-5, 0]])
 ekf = EKFLocalization(dt, std_vel=4, std_steer=np.radians(1))
 ekf.run_localization(landmarks, std_range=0.3, std_bearing=0.1, ellipse_step=1000, iteration_num=600)
-print("--- %s seconds ---" % (time.time() - start_time))     

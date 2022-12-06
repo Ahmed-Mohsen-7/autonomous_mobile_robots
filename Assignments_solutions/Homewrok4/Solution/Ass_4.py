@@ -149,6 +149,7 @@ class PFLocalization():
         #ekf update
         for i, landmark in enumerate(landmarks):
             for index,prtcl in enumerate(particles):
+                print(prtcl.shape)
                 particles[index,:] = self.ekf_update(index,prtcl,z[i], landmark).reshape(1,3)
 
         #weights update
@@ -316,4 +317,5 @@ landmarks = array([[50, 100], [40, 90], [150, 150], [-150, 200]])
 prtcls_no = 100
 pfl = PFLocalization(prtcls_no,dt, std_vel=1, std_steer=np.radians(1))
 #pfl.run_localization(100, landmarks, initial_x=(0, 0, -3*np.pi/4), iteration_num=2000)
-pfl.run_localization(prtcls_no, landmarks, iteration_num=100)
+pfl.run_localization(prtcls_no, landmarks, iteration_num=2000)
+
