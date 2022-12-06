@@ -146,5 +146,9 @@ mapping (SLAM)   [:books: ](lectures/amr_mapping_and_localization.pdf)
 	</ul> 
 
 
+## Note:
+This repo contains my homeworks and quizes (**TODO**) solutions for Autonomous MObile Robots course (Fall 22) by instructor [Geesara](https://github.com/GPrathap). The solutions are presented in  seperate folders.
+
+
 
 
